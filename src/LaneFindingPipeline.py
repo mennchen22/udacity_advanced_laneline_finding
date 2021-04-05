@@ -1,7 +1,7 @@
 import cv2
 import matplotlib.image as mpimg
 from src.CameraCalibration import CameraCalibration
-from src.ColorThresholdImage import hls_select
+from src.ColorThresholdImage import white_line_detection_hls
 from src.LanePolynomial import RoadLineFit
 from src.PerspectiveTransformation import road_perspective_transformation
 from src.Plotting import plot_results, add_polygon, add_text
@@ -19,13 +19,18 @@ def add_results_to_image(original_img, polyline_img, car_offset, lane_radius):
     # print image back to original image
     unwrap_img, _ = road_perspective_transformation(polyline_img, show_transformation_line=False, reverse=True)
     # add to original image with additional data
-    out_image = cv2.addWeighted(original_img, 1, unwrap_img, 0.3, 0)
-
-    side = "right" if car_offset > 0 else "left"
-    car_offset_text = "[Car Center Offset] {:.2f} m to the {}".format(abs(car_offset), side)
-    add_text(out_image, car_offset_text, (30, 50))
-    lane_radius_text = f"[Lane radius] {lane_radius} m"
-    add_text(out_image, lane_radius_text, (30, 120))
+    out_image = cv2.addWeighted(original_img, 1, unwrap_img, 0.3, 0, dtype=cv2.CV_64F)
+    if car_offset is None:
+        add_text(out_image, "[Car Center Offset] --- ", (30, 50))
+    else:
+        side = "right" if car_offset > 0 else "left"
+        car_offset_text = "[Car Center Offset] {:.2f} m to the {}".format(abs(car_offset), side)
+        add_text(out_image, car_offset_text, (30, 50))
+    if lane_radius is None:
+        add_text(out_image, "[Lane radius] ---", (30, 120))
+    else:
+        lane_radius_text = f"[Lane radius] {lane_radius} m"
+        add_text(out_image, lane_radius_text, (30, 120))
     return out_image
 
 
@@ -44,7 +49,7 @@ if __name__ == "__main__":
     # make a perspective transformation
     wrap_img, _ = road_perspective_transformation(undistorted_img, show_transformation_line=False)
     # create an binary image
-    binary_image_wrap = hls_select(wrap_img, thresh=(120, 255))
+    binary_image_wrap = white_line_detection_hls(wrap_img, thresh=(120, 255))
     # calculate segments
     road_line_fit = RoadLineFit()
     poly_img = road_line_fit.lane_line_pipe(binary_warped=binary_image_wrap)

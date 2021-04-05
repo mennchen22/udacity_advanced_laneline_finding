@@ -93,16 +93,30 @@ corrected based on the received information. An example is shown below.
 _The code for this step is located in [ColorThresholdImage.py](./src/ColorThresholdImage.py)_
 
 To detect the lane lines a binary image is used with should only represent features likely to be lane lines. Therefore,
-two approaches will be compared. A combination of multiple convolution filters (like sobel) will be processed over the
-image. Later on the results will be combined to a single image highlights the features within each of the filters.
+multiple approaches will be combined to get the lane from different settings. Settings could be:
 
-The thresholds are the best practise values from the lesson exercises. An example is shown below.
+* Lane color
+* Lighting conditions
+* Shadows
+* Road surface
 
-![alt text][image3]
+Therefore, multiple binary thresholds over different color spaces of an original image will be taken and combined.
 
-The second approach converts the image in the HSL color space. The luminosity space is used to detect highly light
-reflecting objects, like lane lines. The result are more reliable than the binary convolution filters shown above. An
-example is attched here.
+First convolutional filters will be taken (such as sobel) to detect lines within the image. To remove noise from the
+image a dilation and erosion convolution will remove some noise from the image. After the dilation sobel, magnitude and
+direction filters are combined as follows:
+
+```python
+combined[((gradx == 1) & (grady == 1))] = 1
+combined[(mag_binary == 1) & (dir_binary == 1)] = 1
+```
+
+Afterwards orange lines will be detected within the V color space of HSV, white lines in L from HSL, lane detection in
+respect of shadows from B in LAB and another white lane from L in LUV color space. If less than 80% of the image pixels
+within each lane detection image are white, the result will be mapped as a bitwise OR with the combined convolution lane
+detection to the result image. This selection will help to detect lanes in different lighting conditions.
+
+A result is shown below:
 
 ![alt text][image4]
 
@@ -137,7 +151,7 @@ This resulted in the following source and destination points:
 | 213.33333 , 720.    | 200. , 720.      | Bottom Laft|
 
 I verified that my perspective transform was working as expected by drawing the `src` and `dst` points onto a test image
-and its warped counterpart to verify that the lines appear parallel in the warped image. Then a revert the process to 
+and its warped counterpart to verify that the lines appear parallel in the warped image. Then a revert the process to
 see if the image section is recreateable.
 
 The wrapped image:
@@ -148,16 +162,21 @@ Reverted wrapped image:
 
 ![alt text][image6]
 
-#### 4.  Calculating the polynomial from the lane lines
+#### 4. Calculating the polynomial from the lane lines
 
 _The code for this step is located in [LanePolynomial.py](./src/LanePolynomial.py)_
 
-For this part the perspective wrapped image is taken in the `find_lane_pixels()` function and within the first iteration a histogram is used to identify
-the lane starting positions at the bottom. Then iteratively over a number of windows a slice is taken 
-from both the left, and the right site, and the lane position is adjusted.
-The positions are used to calculate a polynomial fit with `cv2.polyfit()`. The result is used to calculate the `y(x)` 
-positions of both lane line polynomials. The result is stored so that in another image the lane could be searched within a margin
-around the last lane. This is done by the function `search_around_poly()` within a `RoadLineFit` class, storing all information.
+For this part the perspective wrapped image is taken in the `find_lane_pixels()` function and within the first iteration
+a histogram is used to identify the lane starting positions at the bottom. Then iteratively over a number of windows a
+slice is taken from both the left, and the right site, and the lane position is adjusted. The positions are used to
+calculate a polynomial fit with `cv2.polyfit()`. The result is used to calculate the `y(x)`
+positions of both lane line polynomials. The result is stored so that in another image the lane could be searched within
+a margin around the last lane. This is done by the function `search_around_poly()` within a `RoadLineFit` class, storing
+all information.
+
+The pipeline will calculate the lane gap distance and reset the stored values, if they are not plausible. It the
+pipeline successfully detect a lane, the bottom image part and will be stored to improve the lane detection within the
+next image.
 
 Example of a first image processed with the lane finding algorithm:
 
@@ -167,23 +186,25 @@ In another step the lane line is searched near the last one. The margin boundary
 
 ![alt text][image8]
 
-#### 5.  Calculate the real world lane radius and car position offset
+#### 5. Calculate the real world lane radius and car position offset
 
-_The code for this step is part of the lane line finding pipeline and is located in [LanePolynomial.py](./src/LanePolynomial.py)_
+_The code for this step is part of the lane line finding pipeline and is located
+in [LanePolynomial.py](./src/LanePolynomial.py)_
 
-For the road radius calculation a meter to pixel scale is used to transform the sized 
-to a real world imperial measurement. Given by the formula (image from this [tutorial](https://www.intmath.com/applications-differentiation/8-radius-curvature.php))
+For the road radius calculation a meter to pixel scale is used to transform the sized to a real world imperial
+measurement. Given by the formula (image from
+this [tutorial](https://www.intmath.com/applications-differentiation/8-radius-curvature.php))
 
 ![alt text][radius_formula]
 
-the radius can be calculated. Additionally, the bottom positions of the lane lines will be isolated and the car position 
+the radius can be calculated. Additionally, the bottom positions of the lane lines will be isolated and the car position
 offset based in the center of the two lanes is computes as well.
 
 #### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
 
-At the end all steps are combined within a single pipeline. The reverse perspective transformation is used to print the result back on the original image. 
-Additionally, the space between the lanes is filled with green and added over the road image as well. Lane radius and car offset are plotted onto the image, too.
-The result is shown below:
+At the end all steps are combined within a single pipeline. The reverse perspective transformation is used to print the
+result back on the original image. Additionally, the space between the lanes is filled with green and added over the
+road image as well. Lane radius and car offset are plotted onto the image, too. The result is shown below:
 
 ![alt text][image9]
 
@@ -199,14 +220,8 @@ Here's a [link to my video result](./output_videos/lane_detection_project.mp4)
 
 ### Discussion
 
-The pipeline can detect lane lines in good lighting conditions. To avoid losing the lane in different lighting szenarios 
-within a single image stream, the binary image thresholds should be more flexible. Maybe a rough lane type detection can choose 
-from a preset of filters to calculate with the best binary thresholds 
-for different lighting conditions.
-
-At least the last lane lines will be used to speed up the process, but the parameters
-have to be adjusted more to match with real road curvatures. Testing is needed. Additionally, 
-more edge cases can be implemented to detect road loss and restart the pipeline.
-
+The pipeline could store more information from previous lane detection to search the lane if the parameters dose not fit
+real world scenarios. Within the binary image transformation more edge cases could be filtered, like noise, reflections
+and objects within the image, blocking the lane.
 
 

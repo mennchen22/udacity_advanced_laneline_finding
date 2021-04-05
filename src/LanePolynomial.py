@@ -3,7 +3,7 @@ import matplotlib.image as mpimg
 import numpy as np
 
 from src.CameraCalibration import CameraCalibration
-from src.ColorThresholdImage import hls_select
+from src.ColorThresholdImage import white_line_detection_hls
 from src.PerspectiveTransformation import road_perspective_transformation
 from src.Plotting import plot_results, add_polygon
 
@@ -19,7 +19,10 @@ class RoadLineFit:
         self.right_y = None
         self.left_fit = None
         self.right_fit = None
+        self.saved_left_fit = None
+        self.saved_right_fit = None
         self.failed_process = False
+        self.bottom_image_pixel = None
         self.ym_per_pix = ym_per_pix
         self.xm_per_pix = xm_per_pix
         self.last_lane_radius_left = None
@@ -33,8 +36,8 @@ class RoadLineFit:
         self.left_y = None
         self.right_x = None
         self.right_y = None
-        self.left_fit = None
-        self.right_fit = None
+        self.left_fit = None if self.saved_left_fit is None else self.saved_left_fit
+        self.right_fit = None if self.saved_right_fit is None else self.saved_right_fit
         self.failed_process = False
 
     def get_road_fits(self):
@@ -76,16 +79,33 @@ class RoadLineFit:
         # print(f"[Radius Lanes] [Pix] Left: {left_curve_rad} | Right: {right_curve_rad}")
         return np.min([left_curve_rad, right_curve_rad])
 
+    def check_lane_gap_distance(self, min_length=2.00, max_length=3.75 + 0.25):
+        left_lane_pos = self.left_fit_x[-1]
+        right_lane_pos = self.right_fit_x[-1]
+        gap_distance = ((right_lane_pos - left_lane_pos) / 2) * self.xm_per_pix
+        print(f"Lane gap {gap_distance} m")
+        if (max_length < gap_distance) or (gap_distance < min_length):
+            print(f"Lane doesn't fit plausible gap distance")
+            self.reset_values()
+
+    def check_result_exists(self):
+        if (self.left_fit_x is None) or (self.right_fit_x is None):
+            return False
+        return True
+
     def calculate_car_center_offset_m(self, car_center_pos):
         left_lane_pos = self.left_fit_x[-1]
         right_lane_pos = self.right_fit_x[-1]
         lane_center = left_lane_pos + (right_lane_pos - left_lane_pos) / 2
         offset = (lane_center - car_center_pos) * self.xm_per_pix
-        side = "right" if offset > 0 else "left"
+        # side = "right" if offset > 0 else "left"
         # print("[Car Center Offset] {:.2f} m to the {}".format(abs(offset), side))
         return offset
 
     def lane_line_pipe(self, binary_warped, plot=False):
+        if not (self.bottom_image_pixel is None):
+            print("[Lane Line Pipeline] Take bottom lane saved part")
+            binary_warped = cv2.bitwise_or(binary_warped, self.bottom_image_pixel)
         # check if we have a previous calculation
         if (self.left_fit is None) or (self.right_fit is None):
             output_image = self.lane_line_detection_from_scratch(binary_warped, plot)
@@ -101,19 +121,24 @@ class RoadLineFit:
         output_image = self.add_polynomial_lines(output_image, plot_road_space=not plot)
         return output_image
 
-    def lane_line_detection_from_scratch(self, binary_wrapped, plot):
+    def lane_line_detection_from_scratch(self, binary_wrapped, plot, half=False):
         print("[Lane Line Pipeline] Start from scratch")
         output_image = self.find_lane_pixels(binary_warped=binary_wrapped, plot_lines=plot)
         self.failed_process = not self.fit_poly(binary_wrapped.shape)
         if plot:
             output_image = self.add_color_lines(output_image, False)
         # we can not retry a lane search
-        if self.failed_process:
-            print("[Lane Line Pipe] Lost this line")
+        if self.failed_process and not half:
+            print("[Lane Line Pipe] Lost this line, retry with half image")
+            ind = np.int(binary_wrapped.shape[1] / 2)  # get width/2 value of the image for indexing
+            binary_wrapped[:, 0:ind] = 0  # set top half pixel to black
+            self.lane_line_detection_from_scratch(binary_wrapped, plot, half=True)
+        elif self.failed_process:
+            print("[Lane Line Pipe] Lost this line in half, stop")
             self.reset_values()
         return output_image
 
-    def find_lane_pixels(self, binary_warped, num_windows=9, margin=100, min_pix=50, plot_lines=False):
+    def find_lane_pixels(self, binary_warped, num_windows=12, margin=100, min_pix=50, plot_lines=False):
         """
         Find lane pixels based on the image side (left, right) with a histogram and sliding windows
         :param binary_warped: bird view image of lane lines
@@ -334,6 +359,13 @@ class RoadLineFit:
 
         return out_image
 
+    def save_values(self, bin_image, bottom_pixel_copy=200):
+        print("[Lane Line Pipe] Save values and bottom image section")
+        max_height = bin_image.shape[1]
+        self.bottom_image_pixel = np.zeros_like(bin_image)
+        self.bottom_image_pixel[:, (max_height - bottom_pixel_copy):max_height] = bin_image[:, (
+                                                                                                           max_height - bottom_pixel_copy):max_height]
+
 
 if __name__ == "__main__":
     # image paths
@@ -349,7 +381,7 @@ if __name__ == "__main__":
     # make a perspective transformation
     wrap_img, input_image = road_perspective_transformation(undistorted_img, show_transformation_line=False)
     # create an binary image
-    binary_image_wrap = hls_select(wrap_img, thresh=(120, 255))
+    binary_image_wrap = white_line_detection_hls(wrap_img, thresh=(120, 255))
     # calculate segments
     road_line_fit = RoadLineFit()
     poly_img = road_line_fit.lane_line_pipe(binary_warped=binary_image_wrap, plot=True)

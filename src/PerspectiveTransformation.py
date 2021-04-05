@@ -71,8 +71,6 @@ def road_perspective_transformation(input_image, offset=200, show_transformation
                       [img_size[0] - offset, img_size[1]],  # bottom right
                       [offset, img_size[1]]])  # bottom left
 
-    print(src)
-    print(dst)
     # Given src and dst points, calculate the perspective transform matrix
     if reverse:
         M = cv2.getPerspectiveTransform(dst, src)
